@@ -1,11 +1,12 @@
 ##### This code was developed through multiple iterative refinements using Claude 3.5 Sonnet. 
 ##### It facilitates querying advanced language models like Claude 3.5 Sonnet and Grok via OpenRouter, which currently represent the most sophisticated large language models (LLMs) for code generation and real-time information retrieval. 
 ##### The implementation provides flexible options for incorporating files and directories into the prompt.
+
 ##### Install:
-```bash
+```
 pip install -r requirements.txt
 or
-pip install click rich aiohttp orjson pyyaml keyboard
+pip install click rich aiohttp orjson pyyaml
 ```
 
 ##### Usage:
