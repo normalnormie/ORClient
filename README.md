@@ -4,6 +4,8 @@
 ##### Install:
 ```bash
 pip install -r requirements.txt
+or
+pip install click rich aiohttp orjson pyyaml keyboard
 ```
 
 ##### Usage:
@@ -13,55 +15,155 @@ Usage: orclient.py [OPTIONS] COMMAND [ARGS]...
   AI Code Assistant CLI - A command-line interface for coding-related queries
   using Claude or Grok.
 
-  Context can be provided in multiple ways: - Single file: --context file.py -
-  Multiple files: --context "*.py" - Directories: --context src/ - Multiple
-  patterns: --context "src/**/*.py" --context "docs/*.md"
+  Model Parameters:
 
-  Examples:     # Review code using Claude:     ai-assist review code.py
+  Claude defaults (p10 - p50 - p90):   temperature: 0.0 - 0.50 - 1.0   top_p:
+  0.90 - 1.0 - 1.0   frequency_penalty: 0 - 0 - 0.35   presence_penalty: 0 - 0
+  - 0.35
 
-      # Review code using Grok:     ai-assist --grok review code.py
+  Grok defaults (p10 - p50 - p90):   temperature: 0.50 - 0.80 - 1.0   top_p:
+  1.0 - 1.0 - 1.0   presence_penalty: 0 - 0 - 0.10
 
-      # Explain code with multiple context files:     ai-assist explain
-      main.py --context "src/**/*.py" --context "docs/"
+  Request Cancellation:
+    - Press Ctrl+C to cancel request
+    - Send SIGINT, SIGTERM, or SIGHUP signals
 
-      # Generate documentation:     ai-assist document api.py --output docs.md
-
-      # Custom query with template:     ai-assist query "How to optimize this
-      code?" --template performance --code-file slow.py
+  Context can be provided in multiple ways:
+    - Single file: --context file.py
+    - Multiple files: --context "*.py"
+    - Directories: --context src/
+    - Multiple patterns: --context "src/**/*.py" --context "docs/*.md"
 
 Options:
-  --api-key TEXT  OpenRouter API key (can also be set via OPENROUTER_API_KEY
-                  env variable)
-  --grok          Use Grok model instead of Claude
-  --help          Show this message and exit.
+  --api-key TEXT              OpenRouter API key (can also be set via
+                              OPENROUTER_API_KEY env variable)
+  --grok                      Use Grok model instead of Claude
+  --json                      Output raw JSON response
+  --temperature FLOAT         Temperature (0-1)
+  --top-p FLOAT               Top P (0-1)
+  --top-k INTEGER             Top K
+  --frequency-penalty FLOAT   Frequency penalty (0-2)
+  --presence-penalty FLOAT    Presence penalty (0-2)
+  --repetition-penalty FLOAT  Repetition penalty
+  --min-p FLOAT               Min P (0-1)
+  --top-a FLOAT               Top A
+  --help                      Show this message and exit.
 
 Commands:
-  document   Generate documentation for the given code.
-  explain    Explain how the code works with detailed examples.
-  info       Show information about supported file types and context...
-  query      Send a custom query to the AI model.
-  review     Review code from a file for quality, bugs, and improvements.
-  templates  List available templates and their descriptions.
+  explain     Explain how the code works with detailed examples.
+  parameters  Show information about model parameters and their defaults.
+  query       Send a custom query to the AI model.
+  review      Review code from a file for quality, bugs, and improvements.
+  templates   List available templates and their descriptions
 ```
 
+##### Here are example usages for `orclient.py`, leveraging Claude for code-related tasks and Grok for current events/discussions:
+
 ```bash
-# Show help
-python ai_code_assistant.py --help
+# Set your API key first
+export OPENROUTER_API_KEY='your_api_key_here'
 
-# Show available templates
-python ai_code_assistant.py templates
+# Code Review with Claude
+python orclient.py review path/to/your/code.py
+python orclient.py --temperature 0.7 review complex_algorithm.py
+python orclient.py review app.py --context "src/*.py" --context "tests/*.py"
 
-# Show supported file types and context patterns
-python ai_code_assistant.py info
+# Code Explanation with Claude
+python orclient.py explain database_connection.py
+python orclient.py explain complex_class.py --context "utils/*.py"
+python orclient.py --temperature 0.4 explain authentication.py
 
-# Review code using Claude
-python ai_code_assistant.py review your_code.py --context "src/**/*.py"
+# Custom Code Queries with Claude
+python orclient.py query "How can I optimize this database query?" --code-file query.sql
+python orclient.py query "Convert this function to TypeScript" --code-file function.js
+python orclient.py query "Suggest unit tests for this code" --code-file app.py
 
-# Review code using Grok
-python ai_code_assistant.py --grok review your_code.py --context "src/"
+# Current Events/News with Grok
+python orclient.py --grok query "What are the most significant tech industry developments in the past week?"
+python orclient.py --grok query "Explain the current state of AI regulation globally"
+python orclient.py --grok --temperature 0.9 query "What are the trending discussions in the open source community?"
 
-# Generate documentation
-python ai_code_assistant.py document api.py --output docs.md --format markdown
+# Tech Analysis with Grok
+python orclient.py --grok query "Compare recent developments in LLMs"
+python orclient.py --grok query "What are the emerging trends in cloud computing?"
+python orclient.py --grok query "Analysis of recent cybersecurity incidents"
+
+# Get JSON output for parsing
+python orclient.py --json query "Security review" --code-file auth.py
+python orclient.py --grok --json query "Latest developments in quantum computing"
+
+# List available templates
+python orclient.py templates
+
+# Show parameter information
+python orclient.py parameters
+
+# Using multiple context files
+python orclient.py review main.py --context "src/**/*.py" --context "docs/*.md"
+
+# Complex examples with parameters
+python orclient.py --temperature 0.7 --top-p 0.95 explain complex_algorithm.py
+python orclient.py --grok --temperature 0.9 --presence-penalty 0.1 query "Analysis of current tech startup trends"
+
+# Using different templates
+python orclient.py query "Improve this code" --template refactor --code-file app.py
+python orclient.py query "Fix this bug" --template debug --code-file buggy.py --context "logs/*.txt"
+```
+
+##### Example workflow scenarios:
+
+```bash
+# Code Review Workflow
+# First review the code
+python orclient.py review app.py
+# Then get detailed explanation of complex parts
+python orclient.py explain app.py
+# Finally get optimization suggestions
+python orclient.py query "How can this code be optimized?" --code-file app.py
+
+# Tech Research Workflow with Grok
+# Get overview of a topic
+python orclient.py --grok query "What's happening with AI regulation?"
+# Get deeper analysis
+python orclient.py --grok --temperature 0.7 query "Analyze the implications of recent AI regulation for developers"
+# Get specific recommendations
+python orclient.py --grok query "What should developers consider regarding AI compliance?"
+
+# Debug Workflow
+# Get error analysis
+python orclient.py query "Debug this error" --template debug --code-file broken.py
+# Get fix suggestions
+python orclient.py query "How to fix this error?" --code-file broken.py --context "error_logs.txt"
+# Get prevention tips
+python orclient.py query "How to prevent similar errors?" --code-file broken.py
+
+# Project Analysis
+# Review entire project
+python orclient.py review main.py --context "src/**/*.py"
+# Get architecture suggestions
+python orclient.py query "Suggest architectural improvements" --context "src/**/*.py"
+# Get testing recommendations
+python orclient.py query "Suggest testing strategy" --context "src/**/*.py"
+```
+
+##### Project-specific examples:
+
+```bash
+# Web Application
+python orclient.py review app.py --context "routes/*.py" --context "models/*.py"
+python orclient.py query "Security audit" --context "auth/*.py"
+
+# Data Science Project
+python orclient.py review data_pipeline.py --context "preprocessing/*.py"
+python orclient.py query "Optimize this data processing" --code-file process.py
+
+# API Development
+python orclient.py review api.py --context "endpoints/*.py"
+python orclient.py query "API documentation" --context "api/*.py"
+
+# DevOps
+python orclient.py review deployment.yaml --context "kubernetes/*.yaml"
+python orclient.py --grok query "Current best practices for Kubernetes deployments"
 ```
 
 ##### To further enhance this codebase, we recommend leveraging Claude 3.5 Sonnet's capabilities by incorporating the following contextual details:
