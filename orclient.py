@@ -24,7 +24,6 @@ console = Console()
 
 # Signal handling
 def handle_sigint(signum, frame):
-    console.print("\n[yellow]Cancelling request...[/yellow]")
     sys.exit(0)
 
 
@@ -62,6 +61,14 @@ class GrokConfig(ModelConfig):
         self.presence_penalty = 0.0
 
 
+class GeminiConfig(ModelConfig):
+    def __init__(self):
+        super().__init__()
+        self.temperature = 0.70  # p50 value
+        self.top_p = 1.0
+        self.presence_penalty = 0.0
+
+
 class PromptTemplate:
     def __init__(self, template: str):
         self.template = template
@@ -74,7 +81,7 @@ class PromptTemplate:
 
 
 class AIClient:
-    def __init__(self, api_key: str, use_grok: bool = False):
+    def __init__(self, api_key: str, use_grok: bool = False, use_gemini: bool = False):
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.api_key = api_key
         self.headers = {
@@ -82,8 +89,17 @@ class AIClient:
             "HTTP-Referer": "https://localhost",
             "Content-Type": "application/json"
         }
-        self.model = "x-ai/grok-beta" if use_grok else "anthropic/claude-3.5-sonnet:beta"
-        self.config = GrokConfig() if use_grok else ClaudeConfig()
+        
+        if use_gemini:
+            self.model = "google/gemini-2.0-flash-exp:free"
+            self.config = GeminiConfig()
+        elif use_grok:
+            self.model = "x-ai/grok-beta"
+            self.config = GrokConfig()
+        else:
+            self.model = "anthropic/claude-3.5-sonnet:beta"
+            self.config = ClaudeConfig()
+            
         self.templates = self._load_default_templates()
 
     def _load_default_templates(self) -> Dict[str, PromptTemplate]:
@@ -146,7 +162,8 @@ class AIClient:
             raise KeyError(f"Template '{name}' not found")
         return self.templates[name]
 
-    async def load_context_files(self, paths: Union[str, List[str], Path, List[Path]]) -> List[str]:
+    async def load_context_files(self, paths: Union[str, List[str], Path, List[Path]], quiet: bool = False) -> List[
+        str]:
         """Load and read context from files and directories."""
         if isinstance(paths, (str, Path)):
             paths = [paths]
@@ -183,7 +200,8 @@ class AIClient:
                         """
                         contexts.append(file_info)
                 except Exception as e:
-                    console.print(f"[yellow]Warning:[/yellow] Error loading {file_path}: {e}")
+                    if not quiet:
+                        console.print(f"[yellow]Warning:[/yellow] Error loading {file_path}: {e}")
 
         return contexts
 
@@ -263,6 +281,7 @@ class AIClient:
 @click.option('--api-key', envvar='OPENROUTER_API_KEY',
               help='OpenRouter API key (can also be set via OPENROUTER_API_KEY env variable)')
 @click.option('--grok', is_flag=True, help='Use Grok model instead of Claude')
+@click.option('--gemini', is_flag=True, help='Use Gemini model instead of Claude')
 @click.option('--json', 'json_output', is_flag=True, help='Output raw JSON response')
 @click.option('--temperature', type=float, help='Temperature (0-1)')
 @click.option('--top-p', type=float, help='Top P (0-1)')
@@ -273,9 +292,9 @@ class AIClient:
 @click.option('--min-p', type=float, help='Min P (0-1)')
 @click.option('--top-a', type=float, help='Top A')
 @click.pass_context
-def cli(ctx, api_key, grok, json_output, **kwargs):
+def cli(ctx, api_key, grok, gemini, json_output, **kwargs):
     """
-    AI Code Assistant CLI - A command-line interface for coding-related queries using Claude or Grok.
+    AI Code Assistant CLI - A command-line interface for coding-related queries using Claude, Grok, or Gemini.
 
     \b
     Model Parameters:
@@ -291,24 +310,19 @@ def cli(ctx, api_key, grok, json_output, **kwargs):
       top_p: 1.0 - 1.0 - 1.0
       presence_penalty: 0 - 0 - 0.10
 
-    \b
-    Request Cancellation:
-      - Press Ctrl+C to cancel request
-      - Send SIGINT, SIGTERM, or SIGHUP signals
-
-    \b
-    Context can be provided in multiple ways:
-      - Single file: --context file.py
-      - Multiple files: --context "*.py"
-      - Directories: --context src/
-      - Multiple patterns: --context "src/**/*.py" --context "docs/*.md"
+    Gemini defaults:
+      temperature: 0.70
+      top_p: 1.0
+      presence_penalty: 0.0
     """
     if not api_key:
-        raise click.UsageError(
-            "API key is required. Set it via --api-key or OPENROUTER_API_KEY environment variable.")
+        raise click.UsageError("API key is required. Set it via --api-key or OPENROUTER_API_KEY environment variable.")
+
+    if grok and gemini:
+        raise click.UsageError("Cannot use both --grok and --gemini flags simultaneously.")
 
     ctx.obj = {
-        'client': AIClient(api_key, use_grok=grok),
+        'client': AIClient(api_key, use_grok=grok, use_gemini=gemini),
         'json_output': json_output,
         'model_params': {k: v for k, v in kwargs.items() if v is not None}
     }
@@ -326,10 +340,19 @@ def review(obj, file, context):
             code = f.read()
 
         client = obj['client']
-        contexts = await client.load_context_files(list(context)) if context else None
+        contexts = await client.load_context_files(list(context), quiet=obj['json_output']) if context else None
 
-        model_name = "Grok" if "grok" in client.model else "Claude"
-        with console.status(f"[bold green]Analyzing code with {model_name}...[/bold green]"):
+        if not obj['json_output']:
+            model_name = "Gemini" if "gemini" in client.model else "Grok" if "grok" in client.model else "Claude"
+            with console.status(f"[bold green]Analyzing code with {model_name}...[/bold green]"):
+                response = await client.query_claude(
+                    query="",
+                    contexts=contexts,
+                    template_name="code_review",
+                    template_vars={"code": code},
+                    **obj['model_params']
+                )
+        else:
             response = await client.query_claude(
                 query="",
                 contexts=contexts,
@@ -338,15 +361,20 @@ def review(obj, file, context):
                 **obj['model_params']
             )
 
-            if obj['json_output']:
-                console.print(json.dumps(response, indent=2))
+        if obj['json_output']:
+            if 'choices' in response and response['choices']:
+                content = response['choices'][0].get('message', {})
+                print(json.dumps(content))
             else:
-                if 'choices' in response and response['choices']:
-                    content = response['choices'][0].get('message', {}).get('content', '')
-                    if content:
-                        console.print(content)
-                elif 'error' in response:
-                    console.print(f"[red]Error:[/red] {response['error']}")
+                print(json.dumps(response))
+            return
+
+        if 'choices' in response and response['choices']:
+            content = response['choices'][0].get('message', {}).get('content', '')
+            if content:
+                console.print(content)
+        elif 'error' in response:
+            console.print(f"[red]Error:[/red] {response['error']}")
 
     asyncio.run(run())
 
@@ -363,10 +391,19 @@ def explain(obj, file, context):
             code = f.read()
 
         client = obj['client']
-        contexts = await client.load_context_files(list(context)) if context else None
+        contexts = await client.load_context_files(list(context), quiet=obj['json_output']) if context else None
 
-        model_name = "Grok" if "grok" in client.model else "Claude"
-        with console.status(f"[bold green]Analyzing code with {model_name}...[/bold green]"):
+        if not obj['json_output']:
+            model_name = "Gemini" if "gemini" in client.model else "Grok" if "grok" in client.model else "Claude"
+            with console.status(f"[bold green]Analyzing code with {model_name}...[/bold green]"):
+                response = await client.query_claude(
+                    query="",
+                    contexts=contexts,
+                    template_name="explain_code",
+                    template_vars={"code": code},
+                    **obj['model_params']
+                )
+        else:
             response = await client.query_claude(
                 query="",
                 contexts=contexts,
@@ -375,15 +412,20 @@ def explain(obj, file, context):
                 **obj['model_params']
             )
 
-            if obj['json_output']:
-                console.print(json.dumps(response, indent=2))
+        if obj['json_output']:
+            if 'choices' in response and response['choices']:
+                content = response['choices'][0].get('message', {})
+                print(json.dumps(content))
             else:
-                if 'choices' in response and response['choices']:
-                    content = response['choices'][0].get('message', {}).get('content', '')
-                    if content:
-                        console.print(content)
-                elif 'error' in response:
-                    console.print(f"[red]Error:[/red] {response['error']}")
+                print(json.dumps(response))
+            return
+
+        if 'choices' in response and response['choices']:
+            content = response['choices'][0].get('message', {}).get('content', '')
+            if content:
+                console.print(content)
+        elif 'error' in response:
+            console.print(f"[red]Error:[/red] {response['error']}")
 
     asyncio.run(run())
 
@@ -391,8 +433,7 @@ def explain(obj, file, context):
 @cli.command()
 @click.argument('query')
 @click.option('--template', '-t', help='Name of the template to use')
-@click.option('--code-file', '-f', type=click.Path(exists=True),
-              help='File containing code to include in the query')
+@click.option('--code-file', '-f', type=click.Path(exists=True), help='File containing code to include in the query')
 @click.option('--context', '-c', multiple=True, help='Context files/directories (supports glob patterns)')
 @click.pass_obj
 def query(obj, query, template, code_file, context):
@@ -405,10 +446,19 @@ def query(obj, query, template, code_file, context):
                 template_vars["code"] = f.read()
 
         client = obj['client']
-        contexts = await client.load_context_files(list(context)) if context else None
+        contexts = await client.load_context_files(list(context), quiet=obj['json_output']) if context else None
 
-        model_name = "Grok" if "grok" in client.model else "Claude"
-        with console.status(f"[bold green]Processing query with {model_name}...[/bold green]"):
+        if not obj['json_output']:
+            model_name = "Gemini" if "gemini" in client.model else "Grok" if "grok" in client.model else "Claude"
+            with console.status(f"[bold green]Processing query with {model_name}...[/bold green]"):
+                response = await client.query_claude(
+                    query=query,
+                    contexts=contexts,
+                    template_name=template if template else None,
+                    template_vars=template_vars,
+                    **obj['model_params']
+                )
+        else:
             response = await client.query_claude(
                 query=query,
                 contexts=contexts,
@@ -417,15 +467,20 @@ def query(obj, query, template, code_file, context):
                 **obj['model_params']
             )
 
-            if obj['json_output']:
-                console.print(json.dumps(response, indent=2))
+        if obj['json_output']:
+            if 'choices' in response and response['choices']:
+                content = response['choices'][0].get('message', {})
+                print(json.dumps(content))
             else:
-                if 'choices' in response and response['choices']:
-                    content = response['choices'][0].get('message', {}).get('content', '')
-                    if content:
-                        console.print(content)
-                elif 'error' in response:
-                    console.print(f"[red]Error:[/red] {response['error']}")
+                print(json.dumps(response))
+            return
+
+        if 'choices' in response and response['choices']:
+            content = response['choices'][0].get('message', {}).get('content', '')
+            if content:
+                console.print(content)
+        elif 'error' in response:
+            console.print(f"[red]Error:[/red] {response['error']}")
 
     asyncio.run(run())
 
@@ -433,6 +488,12 @@ def query(obj, query, template, code_file, context):
 @cli.command()
 def templates():
     """List available templates and their descriptions."""
+    if '--json' in sys.argv:
+        client = AIClient("dummy")
+        templates_dict = {name: template.template for name, template in client.templates.items()}
+        print(json.dumps(templates_dict))
+        return
+
     client = AIClient("dummy")  # API key not needed for listing templates
     console.print("\n[bold green]Available Templates:[/bold green]")
     for name, template in client.templates.items():
@@ -443,35 +504,55 @@ def templates():
 @cli.command()
 def parameters():
     """Show information about model parameters and their defaults."""
-    console.print("\n[bold green]Claude Parameters (p10 - p50 - p90):[/bold green]")
-    claude_params = {
-        "temperature": "0.0 - 0.50 - 1.0",
-        "top_p": "0.90 - 1.0 - 1.0",
-        "top_k": "0 - 0 - 0",
-        "frequency_penalty": "0 - 0 - 0.35",
-        "presence_penalty": "0 - 0 - 0.35",
-        "repetition_penalty": "1.0 - 1.0 - 1.0",
-        "min_p": "0 - 0 - 0",
-        "top_a": "0 - 0 - 0"
+    params = {
+        "claude": {
+            "temperature": "0.0 - 0.50 - 1.0",
+            "top_p": "0.90 - 1.0 - 1.0",
+            "top_k": "0 - 0 - 0",
+            "frequency_penalty": "0 - 0 - 0.35",
+            "presence_penalty": "0 - 0 - 0.35",
+            "repetition_penalty": "1.0 - 1.0 - 1.0",
+            "min_p": "0 - 0 - 0",
+            "top_a": "0 - 0 - 0"
+        },
+        "grok": {
+            "temperature": "0.50 - 0.80 - 1.0",
+            "top_p": "1.0 - 1.0 - 1.0",
+            "top_k": "0 - 0 - 0",
+            "frequency_penalty": "0 - 0 - 0",
+            "presence_penalty": "0 - 0 - 0.10",
+            "repetition_penalty": "1.0 - 1.0 - 1.0",
+            "min_p": "0 - 0 - 0",
+            "top_a": "0 - 0 - 0"
+        },
+        "gemini": {
+            "temperature": "0.70",
+            "top_p": "1.0",
+            "top_k": "0",
+            "frequency_penalty": "0",
+            "presence_penalty": "0",
+            "repetition_penalty": "1.0",
+            "min_p": "0",
+            "top_a": "0"
+        }
     }
-    for param, values in claude_params.items():
+
+    if '--json' in sys.argv:
+        print(json.dumps(params))
+        return
+
+    console.print("\n[bold green]Claude Parameters (p10 - p50 - p90):[/bold green]")
+    for param, values in params['claude'].items():
         console.print(f"• [bold]{param}:[/bold] {values}")
 
     console.print("\n[bold green]Grok Parameters (p10 - p50 - p90):[/bold green]")
-    grok_params = {
-        "temperature": "0.50 - 0.80 - 1.0",
-        "top_p": "1.0 - 1.0 - 1.0",
-        "top_k": "0 - 0 - 0",
-        "frequency_penalty": "0 - 0 - 0",
-        "presence_penalty": "0 - 0 - 0.10",
-        "repetition_penalty": "1.0 - 1.0 - 1.0",
-        "min_p": "0 - 0 - 0",
-        "top_a": "0 - 0 - 0"
-    }
-    for param, values in grok_params.items():
+    for param, values in params['grok'].items():
+        console.print(f"• [bold]{param}:[/bold] {values}")
+
+    console.print("\n[bold green]Gemini Parameters:[/bold green]")
+    for param, values in params['gemini'].items():
         console.print(f"• [bold]{param}:[/bold] {values}")
 
 
 if __name__ == "__main__":
     cli()
-
